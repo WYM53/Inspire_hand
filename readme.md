@@ -1,0 +1,25 @@
+# Inspire Hand
+
+本项目旨在完成因时四代灵巧手运动控制、触觉信息采集及数据回放的开发。
+希望能帮助到曾经和我一样，使用Inspire Hand的新人。
+目前完成了 因时四代灵巧手 RH56DFTP_0RL 和 RH56DFTP_2R 运动控制开发。
+触觉采集频率大约维持在30Hz。
+
+## Conda 环境配置
+```bash
+conda create -n rh_hand python=3.9 
+conda activate rh_hand 
+cd Inspire_hand
+pip install -r requirements.txt
+```
+
+## 功能大致介绍
+### 1、控制
+参考`normal()`函数进行修改即可
+### 2、触觉信息采集
+参考`read_multiple_registers_map(duration_sec=0, target_hz=120, gui_fps=30, ave_png_every=0)`
+### 3、触觉信息回放
+参考`replay_log("./logs/tactile_20250619_171636.jsonl", fps=8,speed=2.0，loop=False)`
+
+## 备注
+由于因时官方自身每一批的灵巧手的固件存在不同，不同主要表现在触觉感知可能不同批次的按压后反馈的按压位置不同。这里如果不相同，请检查并调整`format_finger_data()`和`format_palm_data()`函数，可能你实际的硬件对应的读取到的触觉传感器矩阵需要做相关的转置或镜像的变换。
