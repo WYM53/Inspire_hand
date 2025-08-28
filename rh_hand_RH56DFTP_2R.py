@@ -619,12 +619,12 @@ class RH56DFTP_hand:
 
 
 if __name__ == '__main__':
-    ip_address = '192.168.1.9'
+    ip_address = '192.168.1.9' #根据自己灵巧手IP做修改
     port = 6000
     rh = RH56DFTP_hand(ip_address, port, is_connect=True)
     rh.normal()
-    # rh.pre_catch()
-    # rh.catch1()
+    rh.pre_catch()
+    rh.catch1()
 
     print("版本号=", rh.read_firmware_version())
 
@@ -636,10 +636,10 @@ if __name__ == '__main__':
                                        save_png_every=0)
         
         # 触觉数据回放，在没有连接灵巧手时，可以通过 rh = RH56DFTP_hand(ip_address, port, is_connect=False)
-        # rh.replay_log("/home/galaxy/rm65_6f/logs/tactile_20250619_171636.jsonl",
+        # rh.replay_log("/home/galaxy/logs/tactile_test.jsonl",
         #       fps=8,     # 原始纪录采样≈8 Hz
         #       speed=2.0, # 2×倍速
         #       loop=False)
     finally:
-        rh.disconnect()
+        pass
     rh.disconnect()

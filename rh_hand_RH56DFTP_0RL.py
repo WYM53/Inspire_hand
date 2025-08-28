@@ -608,25 +608,24 @@ class RH56DFTP_hand:
 if __name__ == '__main__':
     ip_address = '192.168.11.210'
     port = 6000
-    rh = RH56DFTP_hand(ip_address, port, is_connect=True)
-    rh.normal()
+    rh = RH56DFTP_hand(ip_address, port, is_connect=False)
+    # rh.normal()
     # rh.pre_catch()
     # # rh.catch1()
-
-    print("版本号=", rh.read_firmware_version())
+    # rh.disconnect()
     
     try:
-        # 120 Hz 取样，30 FPS 绘图
-        rh.read_multiple_registers_map(duration_sec=0,
-                                       target_hz=120,
-                                       gui_fps=30,
-                                       save_png_every=0)
+        # # 120 Hz 取样，30 FPS 绘图
+        # rh.read_multiple_registers_map(duration_sec=0,
+        #                                target_hz=120,
+        #                                gui_fps=30,
+        #                                save_png_every=0)
         
-        # 触觉数据回放，在没有连接灵巧手时，可以通过 rh = RH56DFTP_hand(ip_address, port, is_connect=False)
-        # rh.replay_log("/home/jt/wym/logs/tactile_20250818_191238.jsonl",
-        #       fps=8,     # 原始纪录采样≈8 Hz
-        #       speed=2.0, # 2×倍速
-        #       loop=False)
+        # 触觉数据回放，在没有连接灵巧手时，可以通过 rh = RH56DFTP_hand(ip_address, port, is_connect=False) ,打开注释在 finally 处的 pass
+        rh.replay_log("/home/galaxy/Inspire_hand/logs/tactile_test.jsonl", # 注意是绝对路径
+              fps=8,     # 原始纪录采样≈8 Hz
+              speed=2.0, # 2×倍速
+              loop=False)
     finally:
-        rh.disconnect()
-    rh.disconnect()
+        pass
+        # rh.disconnect()

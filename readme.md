@@ -1,7 +1,7 @@
 # Inspire Hand
 
 本项目旨在完成因时四代灵巧手运动控制、触觉信息采集及数据回放的开发。
-希望能帮助到曾经和我一样，使用Inspire Hand的新人。
+希望能帮助到你。
 目前完成了 因时四代灵巧手 RH56DFTP_0RL 和 RH56DFTP_2R 运动控制开发。
 触觉采集频率大约维持在30Hz。
 
@@ -15,11 +15,11 @@ pip install -r requirements.txt
 
 ## 功能大致介绍
 ### 1、控制
-参考`normal()`函数进行修改即可
+参考`normal()`函数进行修改即可，具体参考`rh_hand_RH56DFTP_2R.py`
 ### 2、触觉信息采集
-参考`read_multiple_registers_map(duration_sec=0, target_hz=120, gui_fps=30, ave_png_every=0)`
+参考`read_multiple_registers_map(duration_sec=0, target_hz=120, gui_fps=30, ave_png_every=0)`，具体参考`rh_hand_RH56DFTP_2R.py`
 ### 3、触觉信息回放
-参考`replay_log("./logs/tactile_20250619_171636.jsonl", fps=8,speed=2.0，loop=False)`
+参考`replay_log("/home/galaxy/Inspire_hand/logs/tactile_test.jsonl", fps=8,speed=2.0，loop=False)`，注意这里地址是绝对路径，运行前根据实际情况修改绝对路径，具体参考`rh_hand_RH56DFTP_0RL.py`。/log文件夹下有离线读取触觉信息的示例，通过读取示例信息判断代码是否能够跑通。
 
 ## 备注
 由于因时官方自身每一批的灵巧手的固件存在不同，不同主要表现在触觉感知可能不同批次的按压后反馈的按压位置不同。这里如果不相同，请检查并调整`format_finger_data()`和`format_palm_data()`函数，可能你实际的硬件对应的读取到的触觉传感器矩阵需要做相关的转置或镜像的变换。
