@@ -470,32 +470,19 @@ class RH56DFTP_hand:
                 loop: bool = False):
         """
         回放 tactile_*.jsonl（带滑块 / 暂停 / 倍速 / 循环）
-        ----------------------------------------------------
-        log_path : 日志文件
-        fps      : 文件原始采样帧率
-        speed    : 1.0=正常；2.0=快进；0.5=慢放
-        loop     : True ⇒ 播放完自动重头
+        - 自动兼容两类日志格式（旧：中文手指+原始数组；新：区域名+扁平数组）
+        - 空格键暂停/继续；speed>1.0 快进，<1.0 慢放
         """
 
-        # --------- ① 直接声明区域表 / 布局表 ---------
-        region_dict = {
-            "pinky_tip":   (3000, (3, 3)),
-            "pinky_pad":   (3018, (12, 8)),
-            "pinky_base":  (3210, (10, 8)),
-            "ring_tip":    (3370, (3, 3)),
-            "ring_pad":    (3388, (12, 8)),
-            "ring_base":   (3580, (10, 8)),
-            "middle_tip":  (3740, (3, 3)),
-            "middle_pad":  (3758, (12, 8)),
-            "middle_base": (3950, (10, 8)),
-            "index_tip":   (4110, (3, 3)),
-            "index_pad":   (4128, (12, 8)),
-            "index_base":  (4320, (10, 8)),
-            "thumb_tip":   (4480, (3, 3)),
-            "thumb_pad":   (4498, (12, 8)),
-            "thumb_extra": (4690, (3, 3)),
-            "thumb_base":  (4708, (12, 8)),
-            "palm":        (4900, (8, 14)),
+        # —— 区域定义（只需形状即可） ——
+        region_shape = {
+            "pinky_tip":   (3, 3),  "pinky_pad":   (12, 8), "pinky_base":  (10, 8),
+            "ring_tip":    (3, 3),  "ring_pad":    (12, 8), "ring_base":   (10, 8),
+            "middle_tip":  (3, 3),  "middle_pad":  (12, 8), "middle_base": (10, 8),
+            "index_tip":   (3, 3),  "index_pad":   (12, 8), "index_base":  (10, 8),
+            "thumb_tip":   (3, 3),  "thumb_pad":   (12, 8), "thumb_extra": (3, 3),
+            "thumb_base":  (12, 8),
+            "palm":        (8, 14),
         }
 
         layout_rows = [
@@ -504,102 +491,166 @@ class RH56DFTP_hand:
             ["pinky_base", "ring_base", "middle_base", "index_base", "thumb_extra"],
             ["palm",        None,        None,          None,        "thumb_base"],
         ]
+
+        # —— 读文件 ——
         with open(log_path, "r", encoding="utf-8") as f:
             frames = [json.loads(l) for l in f if l.strip()]
         if not frames:
             print("空日志"); return
 
-        # ---------- 2. 复制 区域 & 布局 ----------
+        # —— 把一帧 entry 解析为 {区域名: 2D矩阵}，自动适配新旧两种结构 ——
+        def entry_to_region_mats(entry: dict) -> dict:
+            mats = {}
+
+            # 判定是否为“新格式”（区域键存在）
+            has_region_keys = any(k in entry for k in ("palm","pinky_tip","thumb_base"))
+            if has_region_keys:
+                # 新格式：区域名 -> 扁平/二维数组
+                for name, shape in region_shape.items():
+                    arr = entry.get(name)
+                    if arr is None:
+                        continue
+                    a = np.asarray(arr)
+                    if a.ndim == 1 and a.size == shape[0]*shape[1]:
+                        a = a.reshape(shape)
+                    elif a.ndim == 2 and a.shape == shape:
+                        pass
+                    else:
+                        # 再尝试强制 reshape（若失败则跳过）
+                        try:
+                            a = a.reshape(shape)
+                        except Exception:
+                            continue
+                    mats[name] = a
+            else:
+                # 旧格式：中文手指 -> 原始寄存器数组；需用已有的格式化函数切成区域矩阵
+                # 掌心
+                palm_raw = entry.get("掌心")
+                if palm_raw:
+                    palm_mat = self.format_palm_data(palm_raw)
+                    if palm_mat is not None:
+                        mats["palm"] = np.asarray(palm_mat)
+
+                # 四指 + 拇指
+                mapping = [("小拇指","pinky"), ("无名指","ring"),
+                        ("中指","middle"), ("食指","index"), ("大拇指","thumb")]
+                for cn, prefix in mapping:
+                    raw = entry.get(cn)
+                    if not raw:
+                        continue
+                    f = self.format_finger_data(cn, raw)
+                    if f is None:
+                        continue
+                    if prefix != "thumb":
+                        mats[f"{prefix}_tip"]  = np.asarray(f["tip_end"])
+                        mats[f"{prefix}_pad"]  = np.asarray(f["tip_touch"])
+                        mats[f"{prefix}_base"] = np.asarray(f["finger_pad"])
+                    else:
+                        mats["thumb_tip"]   = np.asarray(f["tip_end"])
+                        mats["thumb_pad"]   = np.asarray(f["tip_touch"])
+                        mats["thumb_extra"] = np.asarray(f["middle_touch"])
+                        mats["thumb_base"]  = np.asarray(f["finger_pad"])
+
+            return mats
+
+        # —— 画布搭建（与实时版保持一致） ——
         gap_x, gap_y = 1, 1
         right_pad, label_pad, cell_inch = 0.10, 0.02, 0.35
 
-        # ---------- 3. 计算列宽/行高 → 生成空画布（同实时版） ----------
         num_cols = len(layout_rows[0])
-        col_widths  = [max(region_dict[n][1][1] if n else 0
-                        for n in col) for col in zip(*layout_rows)]
-        row_heights = [max(region_dict[n][1][0] if n else 0
-                        for n in row) for row in layout_rows]
+        col_widths  = [max((region_shape[n][1] if n else 0) for n in col) for col in zip(*layout_rows)]
+        row_heights = [max((region_shape[n][0] if n else 0) for n in row) for row in layout_rows]
         W_raw = sum(col_widths) + gap_x*(num_cols-1)
         H_raw = sum(row_heights) + gap_y*(len(row_heights)-1)
         col_left = np.cumsum([0]+[w+gap_x for w in col_widths[:-1]])
-        usable = 1-right_pad
-        fig = plt.figure(figsize=((1+right_pad)*W_raw*cell_inch,
-                                H_raw*cell_inch))
-        norm = mcolors.Normalize(vmin=0, vmax=4096)
-        cmap = plt.get_cmap("hot")
+        usable = 1 - right_pad
+
+        fig = plt.figure(figsize=((1+right_pad)*W_raw*cell_inch, H_raw*cell_inch))
+        norm = mcolors.Normalize(vmin=0, vmax=4096)   # 固定范围，非自适应
+        cmap = plt.get_cmap("hot")                    # 如需“白底最大黑”，可换成 plt.get_cmap("gray_r")
+
         img_handlers = {}
-        # —— 摆子图（与实时版相同） ——
         y_cursor = H_raw
         for r,row in enumerate(layout_rows):
             y_cursor -= row_heights[r]
             for c,name in enumerate(row):
-                if name is None: continue
-                _,(h,w)=region_dict[name]
+                if name is None: 
+                    continue
+                h,w = region_shape[name]
                 left_raw = (W_raw - w)//2 if name=="palm" \
-                        else col_left[c]+(col_widths[c]-w)//2
+                        else col_left[c] + (col_widths[c]-w)//2
                 ax = fig.add_axes([left_raw/W_raw*usable,
                                 y_cursor/H_raw,
                                 w/W_raw*usable, h/H_raw])
-                im=ax.imshow(np.zeros((h,w)),cmap=cmap,norm=norm,
-                            origin="upper",interpolation="nearest")
+                im = ax.imshow(np.zeros((h,w)), cmap=cmap, norm=norm,
+                            origin="upper", interpolation="nearest")
                 ax.axis("off"); ax.set_aspect("equal")
-                ax.text(1+label_pad,.5,name.replace("_"," "),
-                        transform=ax.transAxes,va="center",ha="left",
-                        fontsize=8,clip_on=False)
-                img_handlers[name]=im
-            y_cursor-=gap_y
-        # 色条
-        cax=fig.add_axes([usable+0.02,0.15,0.02,0.7])
-        fig.colorbar(im,cax=cax)
-        ts_text=fig.text(usable+0.02,0.88,"",fontsize=9)
+                ax.text(1+label_pad, .5, name.replace("_"," "),
+                        transform=ax.transAxes, va="center", ha="left",
+                        fontsize=8, clip_on=False)
+                img_handlers[name] = im
+            y_cursor -= gap_y
 
-        # ---------- 4. 进度滑块 ----------
-        ax_slider=fig.add_axes([0.1,0.02,0.6,0.03])
-        slider=Slider(ax_slider,"frame",0,len(frames)-1,
-                    valinit=0,valstep=1)
-        paused=[False]          # 可变容器用于闭包
+        cax = fig.add_axes([usable+0.02, 0.15, 0.02, 0.7])
+        fig.colorbar(im, cax=cax)
+        ts_text = fig.text(usable+0.02, 0.88, "", fontsize=9)
+
+        # —— 滑块 / 事件 ——
+        from matplotlib.widgets import Slider
+        ax_slider = fig.add_axes([0.1, 0.02, 0.6, 0.03])
+        slider = Slider(ax_slider, "frame", 0, len(frames)-1, valinit=0, valstep=1)
+        paused = [False]
 
         def draw_frame(idx: int):
             entry = frames[idx]
-            for name, data in entry.items():
-                if name == "timestamp" or name not in img_handlers:
-                    continue
-                shape = region_dict[name][1]
-                if len(data) == shape[0] * shape[1]:
-                    img_handlers[name].set_data(
-                        np.asarray(data).reshape(shape)
-                    )
+            mats = entry_to_region_mats(entry)
 
-            ts = entry.get("timestamp", "")
-            ts_text.set_text(ts)                                          # 画布上
-            fig.canvas.manager.set_window_title(f"Tactile Replay  •  {ts}")  # 标题栏
+            for name, im in img_handlers.items():
+                mat = mats.get(name)
+                if mat is None:
+                    continue
+                # 兜底：若尺寸不符，尝试 reshape
+                h,w = region_shape[name]
+                if mat.shape != (h,w):
+                    try:
+                        mat = np.asarray(mat).reshape(h,w)
+                    except Exception:
+                        continue
+                im.set_data(mat)
+
+            ts = entry.get("timestamp","")
+            ts_text.set_text(ts)
+            try:
+                fig.canvas.manager.set_window_title(f"Tactile Replay  •  {ts}")
+            except Exception:
+                pass
             fig.canvas.draw_idle()
 
-
-
-        def on_slider(val): draw_frame(int(val))
+        def on_slider(val):
+            draw_frame(int(val))
         slider.on_changed(on_slider)
 
-        # ---------- 5. 键盘空格：暂停/播放 ----------
         def on_key(event):
-            if event.key==" ":
-                paused[0]=not paused[0]
-        fig.canvas.mpl_connect("key_press_event",on_key)
+            if event.key == " ":
+                paused[0] = not paused[0]
+        fig.canvas.mpl_connect("key_press_event", on_key)
 
-        # ---------- 6. 主回放循环 ----------
-        idx=0
+        # —— 主回放循环 ——
+        idx = 0
         try:
             while True:
                 if not paused[0]:
                     draw_frame(idx)
-                    slider.set_val(idx)           # 同步小滑块
-                    idx+=1
-                    if idx>=len(frames):
-                        if loop: idx=0
-                        else: break
-                    plt.pause(max(1e-3, 1.0/fps/speed))
+                    slider.set_val(idx)
+                    idx += 1
+                    if idx >= len(frames):
+                        if loop:
+                            idx = 0
+                        else:
+                            break
+                    plt.pause(max(1e-3, 1.0 / (fps * speed if speed > 0 else fps)))
                 else:
-                    plt.pause(0.05)               # 等待继续
+                    plt.pause(0.05)
         except KeyboardInterrupt:
             pass
         print("回放结束")
